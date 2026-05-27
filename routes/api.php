@@ -54,6 +54,7 @@ Route::prefix('v1')->group(function() {
     // Endpoint Ternak
     Route::get('/ternak', [TernakController::class, 'allTernak']);
     Route::get('/ternak/{user_id}', [TernakController::class, 'ternakUserAll']);
+    Route::get('/ternak/{user_id}/summary', [TernakController::class, 'summaryUser']);
     Route::get('/ternak/{user_id}/{id}', [TernakController::class, 'ternakUser']);
     Route::post('/ternak', [TernakController::class, 'storeTernak']);
     Route::put('/ternak/{user_id}/{id}', [TernakController::class, 'updateTernak']);
@@ -130,6 +131,9 @@ Route::prefix('v1')->group(function() {
     Route::post('/tujuan/ternak/{user_id}', [TernakController::class, 'storeTujuanTernak']);
     Route::put('/tujuan/ternak/{user_id}', [TernakController::class, 'updateTujuanTernak']);
     Route::delete('/tujuan/ternak/{user_id}', [TernakController::class, 'destroyTujuanTernak']);
+
+    // Public test endpoint for AI recommendation (development only)
+    Route::post('/ai/rekomendasi-ternak/test', [AIRecommendationController::class, 'getRecommendationPublic']);
 
     Route::middleware('auth:sanctum')->group(function () {
         // Chat routes

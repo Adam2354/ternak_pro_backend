@@ -10,6 +10,7 @@ use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Support\Str;
+use Illuminate\Database\QueryException;
 
 
 class TernakController extends Controller
@@ -32,8 +33,30 @@ class TernakController extends Controller
      */
     public function allTernak()
     {
-        $ternak = TblTernak::all();
-        return response()->json($ternak);
+        $items = TblTernak::all();
+
+        $hewans = MHewan::all()->keyBy('id');
+
+        $result = [];
+        foreach ($items as $item) {
+            $hewan = $hewans->get($item->hewan_id);
+            $result[] = [
+                'id_ternak' => (int) ($item->id ?? 0),
+                'tag_id' => (string) ($item->tag_id ?? ''),
+                'nama_ternak' => (string) ($item->nama_ternak ?? ''),
+                'hewan_id' => (int) ($item->hewan_id ?? 0),
+                'jenis_hewan' => (string) ($hewan->nama ?? ''),
+                'icon_path' => (string) ($hewan->icon_path ?? ''),
+                'berat' => (float) ($item->berat ?? 0),
+                'usia' => (int) ($item->usia ?? 0),
+                'kondisi_ternak' => (string) ($item->kondisi_ternak ?? ''),
+                'jenis_kelamin' => (string) ($item->jenis_kelamin ?? ''),
+                'tgl_mulai' => $item->tgl_mulai ? Carbon::parse($item->tgl_mulai)->format('Y-m-d') : '',
+                'catatan' => (string) ($item->catatan ?? ''),
+            ];
+        }
+
+        return response()->json($result);
     }
 
     /**
@@ -61,29 +84,105 @@ class TernakController extends Controller
      */
     public function ternakUserAll($user_id)
     {
-        $ternak = TblTernak::where('user_id', $user_id)->get();
-        $ternakData = [];
-        foreach ($ternak as $key => $value) {
-            $hewan = MHewan::where('id', $value->hewan_id)->first();
-            $nama_hewan = $hewan->nama;
-            $icon_path = $hewan->icon_path;
-            $eachTernak = [
-                    'id_ternak' => $value->id,
-                    'tag_id' => $value->tag_id,
-                    'nama_ternak' => $value->nama_ternak,
-                    'jenis_hewan' => $nama_hewan,
-                    'icon_path' => $icon_path,
-                    'berat' => $value->berat,
-                    'usia' => $value->usia,
-                    'kondisi_ternak' => $value->kondisi_ternak,
-                    'jenis_kelamin' => $value->jenis_kelamin,
-                    'tgl_mulai' => Carbon::parse($value->tgl_mulai)->format('Y-m-d'),
-                    'catatan' => $value->catatan
-                ];
-            $ternakData[] = $eachTernak; // Menambahkan jenis_ternak_id ke dalam array
+        $items = TblTernak::where('user_id', $user_id)
+            ->select([
+                'id',
+                'tag_id',
+                'nama_ternak',
+                'hewan_id',
+                'berat',
+                'usia',
+                'kondisi_ternak',
+                'jenis_kelamin',
+                'tgl_mulai',
+                'catatan'
+            ])
+            ->get();
+
+        $hewans = MHewan::all()->keyBy('id');
+
+        $result = [];
+        foreach ($items as $item) {
+            $hewan = $hewans->get($item->hewan_id);
+
+            $result[] = [
+                'id_ternak' => (int) ($item->id ?? 0),
+                'tag_id' => (string) ($item->tag_id ?? ''),
+                'nama_ternak' => (string) ($item->nama_ternak ?? ''),
+                'hewan_id' => (int) ($item->hewan_id ?? 0),
+                'jenis_hewan' => (string) ($hewan->nama ?? ''),
+                'icon_path' => (string) ($hewan->icon_path ?? ''),
+                'berat' => (float) ($item->berat ?? 0),
+                'usia' => (int) ($item->usia ?? 0),
+                'kondisi_ternak' => (string) ($item->kondisi_ternak ?? ''),
+                'jenis_kelamin' => (string) ($item->jenis_kelamin ?? ''),
+                'tgl_mulai' => $item->tgl_mulai ? Carbon::parse($item->tgl_mulai)->format('Y-m-d') : '',
+                'catatan' => (string) ($item->catatan ?? ''),
+            ];
         }
 
-        return response()->json($ternakData); // Mengembalikan array tugasData setelah iterasi selesai
+        return response()->json($result);
+    }
+
+    /**
+     * Ringkasan data ternak untuk user (counts per kondisi dan rata-rata usia)
+     */
+    public function summaryUser(Request $request, $user_id)
+    {
+        $scope = $request->query('scope', 'all'); // 'all' or 'today'
+
+        $baseQuery = TblTernak::where('user_id', $user_id);
+        if ($scope === 'today') {
+            $today = Carbon::now()->format('Y-m-d');
+            $baseQuery = $baseQuery->whereDate('created_at', $today);
+        }
+
+        $total = $baseQuery->count();
+
+        $counts = $baseQuery->select('kondisi_ternak')
+            ->get()
+            ->groupBy(function ($item) {
+                return trim(strtolower($item->kondisi_ternak ?? ''));
+            })
+            ->map(fn($g) => $g->count())
+            ->toArray();
+
+        $sakit = $counts['sakit'] ?? 0;
+        $sehat = $counts['sehat'] ?? 0;
+
+        $rataUsia = (float) round($baseQuery->avg('usia') ?? 0, 2);
+
+        // detect "siap jual" by matching tujuan_ternak.nama keywords (user-defined)
+        $tujuanQuery = MTujuanTernak::where('user_id', $user_id)->get();
+        $keywords = ['jual', 'siap jual', 'penjualan', 'jual/ambil', 'dipanen'];
+        $matchedTujuanIds = $tujuanQuery->filter(function ($t) use ($keywords) {
+            $nama = strtolower($t->nama ?? '');
+            foreach ($keywords as $k) {
+                if (str_contains($nama, strtolower($k))) return true;
+            }
+            return false;
+        })->pluck('id')->toArray();
+
+        $siapJualQuery = TblTernak::where('user_id', $user_id);
+        if ($scope === 'today') {
+            $siapJualQuery = $siapJualQuery->whereDate('created_at', Carbon::now()->format('Y-m-d'));
+        }
+        if (!empty($matchedTujuanIds)) {
+            $siapJualQuery = $siapJualQuery->whereIn('tujuan_ternak_id', $matchedTujuanIds);
+        } else {
+            // fallback: if no matching tujuan labels, consider those with usia > 0 and kondisi 'Sehat'
+            $siapJualQuery = $siapJualQuery->where('usia', '>', 0)->where('kondisi_ternak', 'Sehat');
+        }
+        $siapJual = $siapJualQuery->count();
+
+        return response()->json([
+            'total' => $total,
+            'sakit' => $sakit,
+            'sehat' => $sehat,
+            'rata_rata_usia' => $rataUsia,
+            'siap_jual' => $siapJual,
+            'scope' => $scope,
+        ]);
     }
 
     /**
@@ -123,28 +222,31 @@ class TernakController extends Controller
     public function ternakUser($user_id, $id)
     {
         $ternak = TblTernak::where('user_id', $user_id)->where('id', $id)->first();
-        $hewan = MHewan::where('id', $ternak->hewan_id)->first();
-            $nama_hewan = $hewan->nama;
-            $icon_path = $hewan->icon_path;
-            $ternakData = [
-                    'id_ternak' => $ternak->id,
-                    'tag_id' => $ternak->tag_id,
-                    'nama_ternak' => $ternak->nama_ternak,
-                    'jenis_hewan' => $nama_hewan,
-                    'icon_path' => $icon_path,
-                    'berat' => $ternak->berat,
-                    'usia' => $ternak->usia,
-                    'kondisi_ternak' => $ternak->kondisi_ternak,
-                    'jenis_kelamin' => $ternak->jenis_kelamin,
-                    'tgl_mulai' => Carbon::parse($ternak->tgl_mulai)->format('Y-m-d'),
-                    'catatan' => $ternak->catatan
-                ];
 
-        if ($ternakData) {
-            return response()->json($ternakData);
-        } else {
+        if (!$ternak) {
             return response()->json(['message' => 'Ternak tidak ditemukan'], 404);
         }
+
+        $hewan = MHewan::where('id', $ternak->hewan_id)->first();
+
+        $nama_hewan = $hewan->nama ?? '';
+        $icon_path = $hewan->icon_path ?? '';
+
+        $ternakData = [
+            'id_ternak' => (int) ($ternak->id ?? 0),
+            'tag_id' => (string) ($ternak->tag_id ?? ''),
+            'nama_ternak' => (string) ($ternak->nama_ternak ?? ''),
+            'jenis_hewan' => (string) $nama_hewan,
+            'icon_path' => (string) $icon_path,
+            'berat' => (float) ($ternak->berat ?? 0),
+            'usia' => (int) ($ternak->usia ?? 0),
+            'kondisi_ternak' => (string) ($ternak->kondisi_ternak ?? ''),
+            'jenis_kelamin' => (string) ($ternak->jenis_kelamin ?? ''),
+            'tgl_mulai' => $ternak->tgl_mulai ? Carbon::parse($ternak->tgl_mulai)->format('Y-m-d') : '',
+            'catatan' => (string) ($ternak->catatan ?? ''),
+        ];
+
+        return response()->json($ternakData);
     }
 
     /**

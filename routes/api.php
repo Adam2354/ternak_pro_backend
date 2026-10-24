@@ -20,10 +20,12 @@ use App\Http\Controllers\TNotificationController;
 
 Route::prefix('v1')->group(function() {
 
-    Route::get('/test-env', function () {
-        // Menampilkan semua variabel dari .env
-        dd(env('DEEPSEEK_API_KEY'));
-    });
+Route::get('/test-env', function () {
+    return response()->json([
+        'app_running' => true,
+        'deepseek_key_configured' => !empty(config('services.deepseek.api_key')),
+    ]);
+});
 
     // Endpoint Auth
     Route::post('/register', [AuthController::class, 'register']);

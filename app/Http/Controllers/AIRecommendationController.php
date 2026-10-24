@@ -15,7 +15,7 @@ class AIRecommendationController extends Controller
     {
         $this->pythonServiceUrl = env(
             'PYTHON_AI_SERVICE_URL',
-            'http://127.0.0.1:8001'
+            'https://ternakpro-ai.onrender.com'
         );
     }
 

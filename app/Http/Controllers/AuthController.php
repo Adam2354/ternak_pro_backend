@@ -13,6 +13,7 @@ use App\Models\User;
 use App\Models\MJenisTugas;
 use App\Models\MTujuanTernak;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
@@ -76,7 +77,7 @@ class AuthController extends Controller
             'email' => 'required|string|email|max:255|unique:users',
             'password' => 'required|string|min:8|confirmed',
             'no_telepon' => 'nullable|string|max:20',
-            'role_id' => 'required|exists:roles,id',
+            'role_id' => 'nullable|exists:roles,id',
         ]);
 
         if ($validator->fails()) {
@@ -87,80 +88,86 @@ class AuthController extends Controller
             ], 422);
         }
 
-        // Create user
-        $user = User::create([
-            'uid' => Str::uuid()->toString(), // Generate UUID for uid
-            'name' => $request->name,
-            'email' => $request->email,
-            'password' => Hash::make($request->password),
-            'no_telepon' => $request->no_telepon,
-            'role_id' => $request->role_id,
-        ]);
+        try {
+            $result = DB::transaction(function () use ($request) {
+                $user = User::create([
+                    'uid' => Str::uuid()->toString(),
+                    'name' => $request->name,
+                    'email' => $request->email,
+                    'password' => Hash::make($request->password),
+                    'no_telepon' => $request->no_telepon,
+                    'role_id' => $request->role_id ?? 3,
+                ]);
 
-        // ==========================DATA DEFAULT KETIKA REGISTER===============================
-        // Ambil semua data aktif dari MDefaultJenisTugas
-        $defaultJenisTugas = MDefaultJenisTugas::where('is_aktif', true)->get();
-        foreach ($defaultJenisTugas as $jenisTugas) {
-            MJenisTugas::create([
-                'user_id' => $user->uid, // Pastikan kamu memiliki $user di sini
-                'nama' => $jenisTugas->nama,
-                'icon_path' => $jenisTugas->icon_path,
-                'created_at' => now()->format('Y-m-d H:i:s'),
-                'updated_at' => now()->format('Y-m-d H:i:s'),
-            ]);
+                $defaultJenisTugas = MDefaultJenisTugas::where('is_aktif', true)->get();
+                foreach ($defaultJenisTugas as $jenisTugas) {
+                    MJenisTugas::create([
+                        'user_id' => $user->uid,
+                        'nama' => $jenisTugas->nama,
+                        'icon_path' => $jenisTugas->icon_path,
+                        'created_at' => now()->format('Y-m-d H:i:s'),
+                        'updated_at' => now()->format('Y-m-d H:i:s'),
+                    ]);
+                }
+
+                $defaultAset = MDefaultAsset::where('is_aktif', true)->get();
+                foreach ($defaultAset as $aset) {
+                    MAsset::create([
+                        'user_id' => $user->uid,
+                        'nama' => $aset->nama,
+                        'created_at' => now()->format('Y-m-d H:i:s'),
+                        'updated_at' => now()->format('Y-m-d H:i:s'),
+                    ]);
+                }
+
+                $defaultTujuanTernak = MDefaultTujuanTernak::where('is_aktif', true)->get();
+                foreach ($defaultTujuanTernak as $tujuanTernak) {
+                    MTujuanTernak::create([
+                        'user_id' => $user->uid,
+                        'nama' => $tujuanTernak->nama,
+                        'created_at' => now()->format('Y-m-d H:i:s'),
+                        'updated_at' => now()->format('Y-m-d H:i:s'),
+                    ]);
+                }
+
+                $conversation = Conversation::create([
+                    'user_id' => $user->uid,
+                    'title' => 'Conversation '.$user->name
+                ]);
+
+                Message::create([
+                    'conversation_id' => $conversation->id,
+                    'role' => 'assistant',
+                    'content' => 'Halo ' . $user->name . '👋, Kenalin Aku Siternak Asisten Ternak Pribadimu!'
+                ]);
+
+                Message::create([
+                    'conversation_id' => $conversation->id,
+                    'role' => 'assistant',
+                    'content' => 'Bagaimana Aku Bisa Membantumu ☺️ ?'
+                ]);
+
+                $token = $user->createToken('auth_token')->plainTextToken;
+
+                return [
+                    'user' => $user,
+                    'token' => $token,
+                ];
+            });
+        } catch (\Throwable $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Registration failed',
+                'error' => $e->getMessage(),
+            ], 500);
         }
-
-        $defaultAset = MDefaultAsset::where('is_aktif', true)->get();
-        foreach ($defaultAset as $aset) {
-            MAsset::create([
-                'user_id' => $user->uid, // Pastikan kamu memiliki $user di sini
-                'nama' => $aset->nama,
-                'created_at' => now()->format('Y-m-d H:i:s'),
-                'updated_at' => now()->format('Y-m-d H:i:s'),
-            ]);
-        }
-
-        $defaultTujuanTernak = MDefaultTujuanTernak::where('is_aktif', true)->get();
-        foreach ($defaultTujuanTernak as $tujuanTernak) {
-            MTujuanTernak::create([
-                'user_id' => $user->uid, // Pastikan kamu memiliki $user di sini
-                'nama' => $tujuanTernak->nama,
-                'created_at' => now()->format('Y-m-d H:i:s'),
-                'updated_at' => now()->format('Y-m-d H:i:s'),
-            ]);
-        }
-
-        // Chat awal
-         // Get or create conversation
-        $conversation = Conversation::create([
-                'user_id' => $user->uid,
-                'title' => 'Conversation '.$user->name
-            ]);
-        
-        // Save user message
-        Message::create([
-            'conversation_id' => $conversation->id,
-            'role' => 'assistant',
-            'content' => 'Halo ' . $user->name . '👋, Kenalin Aku Siternak Asisten Ternak Pribadimu!'
-        ]);
-
-        Message::create([
-            'conversation_id' => $conversation->id,
-            'role' => 'assistant',
-            'content' => 'Bagaimana Aku Bisa Membantumu ☺️ ?'
-        ]);
-        
-        // ==================================================================================================
-
-        // Generate Sanctum token
-        $token = $user->createToken('auth_token')->plainTextToken;
 
         return response()->json([
             'status' => 'success',
             'message' => 'User registered successfully',
             'data' => [
-                'user' => $user,
-                'token' => $token,
+                'user' => $result['user'],
+                'token' => $result['token'],
             ],
         ], 201);
     }
@@ -173,56 +180,75 @@ class AuthController extends Controller
             'email' => 'required|string|email|max:255|unique:users',
             'password' => 'required|string|min:8|confirmed',
             'no_telepon' => 'nullable|string|max:20',
-            'role_id' => 'required|exists:roles,id',
+            'role_id' => 'nullable|exists:roles,id',
         ]);
 
         if ($validator->fails()) {
             return back()->withErrors($validator)->withInput();  // Redirect back with errors and input data
         }
 
-        // Create user
-        $user = User::create([
-            'uid' => Str::uuid()->toString(), // Generate UUID for uid
-            'name' => $request->name,
-            'email' => $request->email,
-            'password' => Hash::make($request->password),
-            'no_telepon' => $request->no_telepon,
-            'role_id' => $request->role_id,
-        ]);
+        try {
+            DB::transaction(function () use ($request) {
+                $user = User::create([
+                    'uid' => Str::uuid()->toString(),
+                    'name' => $request->name,
+                    'email' => $request->email,
+                    'password' => Hash::make($request->password),
+                    'no_telepon' => $request->no_telepon,
+                    'role_id' => $request->role_id ?? 3,
+                ]);
 
-        // ========================== DATA DEFAULT KETIKA REGISTER ================================
-        // Ambil semua data aktif dari MDefaultJenisTugas
-        $defaultJenisTugas = MDefaultJenisTugas::where('is_aktif', true)->get();
-        foreach ($defaultJenisTugas as $jenisTugas) {
-            MJenisTugas::create([
-                'user_id' => $user->uid,
-                'nama' => $jenisTugas->nama,
-                'icon_path' => $jenisTugas->icon_path,
-                'created_at' => now(),
-                'updated_at' => now(),
-            ]);
+                $defaultJenisTugas = MDefaultJenisTugas::where('is_aktif', true)->get();
+                foreach ($defaultJenisTugas as $jenisTugas) {
+                    MJenisTugas::create([
+                        'user_id' => $user->uid,
+                        'nama' => $jenisTugas->nama,
+                        'icon_path' => $jenisTugas->icon_path,
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ]);
+                }
+
+                $defaultAset = MDefaultAsset::where('is_aktif', true)->get();
+                foreach ($defaultAset as $aset) {
+                    MAsset::create([
+                        'user_id' => $user->uid,
+                        'nama' => $aset->nama,
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ]);
+                }
+
+                $defaultTujuanTernak = MDefaultTujuanTernak::where('is_aktif', true)->get();
+                foreach ($defaultTujuanTernak as $tujuanTernak) {
+                    MTujuanTernak::create([
+                        'user_id' => $user->uid,
+                        'nama' => $tujuanTernak->nama,
+                        'created_at' => now(),
+                        'updated_at' => now(),
+                    ]);
+                }
+
+                $conversation = Conversation::create([
+                    'user_id' => $user->uid,
+                    'title' => 'Conversation '.$user->name
+                ]);
+
+                Message::create([
+                    'conversation_id' => $conversation->id,
+                    'role' => 'assistant',
+                    'content' => 'Halo ' . $user->name . '👋, Kenalin Aku Siternak Asisten Ternak Pribadimu!'
+                ]);
+
+                Message::create([
+                    'conversation_id' => $conversation->id,
+                    'role' => 'assistant',
+                    'content' => 'Bagaimana Aku Bisa Membantumu ☺️ ?'
+                ]);
+            });
+        } catch (\Throwable $e) {
+            return back()->withErrors(['register' => 'Registration failed: ' . $e->getMessage()])->withInput();
         }
-
-        // Similar data for $defaultAset and $defaultTujuanTernak...
-        // ============================================
-        // Get or create conversation
-        $conversation = Conversation::create([
-                'user_id' => $user->uid,
-                'title' => 'Conversation '.$user->name
-            ]);
-        
-        // Save user message
-        Message::create([
-            'conversation_id' => $conversation->id,
-            'role' => 'assistant',
-            'content' => 'Halo ' . $user->name . '👋, Kenalin Aku Siternak Asisten Ternak Pribadimu!'
-        ]);
-
-        Message::create([
-            'conversation_id' => $conversation->id,
-            'role' => 'assistant',
-            'content' => 'Bagaimana Aku Bisa Membantumu ☺️ ?'
-        ]);
 
         // Redirect to login page after registration
         return redirect()->route('login')->with('status', 'Akun berhasil dibuat, silakan login.');
@@ -284,9 +310,10 @@ class AuthController extends Controller
      */
     public function login(Request $request)
     {
-        // Validasi data request
+        // Validasi data request: terima `email` atau `email_or_phone`
         $validator = Validator::make($request->all(), [
-            'email_or_phone' => 'required|string',
+            'email' => 'required_without:email_or_phone|nullable|string|email',
+            'email_or_phone' => 'required_without:email|nullable|string',
             'password' => 'required|string',
         ]);
 
@@ -298,14 +325,15 @@ class AuthController extends Controller
             ], 422);
         }
 
-        // Cek apakah input email_or_phone berupa email atau nomor telepon
+        // Ambil input yang tersedia (email atau email_or_phone)
+        $input = $request->input('email') ?? $request->input('email_or_phone');
+
+        // Cek apakah input berupa email atau nomor telepon
         $user = null;
-        if (filter_var($request->email_or_phone, FILTER_VALIDATE_EMAIL)) {
-            // Jika input adalah email, cari user berdasarkan email
-            $user = User::where('email', $request->email_or_phone)->first();
+        if (filter_var($input, FILTER_VALIDATE_EMAIL)) {
+            $user = User::where('email', $input)->first();
         } else {
-            // Jika input bukan email, cari user berdasarkan nomor telepon
-            $user = User::where('no_telepon', $request->email_or_phone)->first();
+            $user = User::where('no_telepon', $input)->first();
         }
 
         // Jika user tidak ditemukan atau password tidak cocok
@@ -338,9 +366,10 @@ class AuthController extends Controller
 
     public function loginWeb(Request $request)
     {
-        // Validasi data request
+        // Validasi data request: terima `email` atau `email_or_phone` untuk web login juga
         $validator = Validator::make($request->all(), [
-            'email_or_phone' => 'required|string',
+            'email' => 'required_without:email_or_phone|nullable|string|email',
+            'email_or_phone' => 'required_without:email|nullable|string',
             'password' => 'required|string',
         ]);
 
@@ -352,12 +381,15 @@ class AuthController extends Controller
             ], 422);
         }
 
-        // Cek apakah input email_or_phone berupa email atau nomor telepon
+        // Ambil input yang tersedia (email atau email_or_phone)
+        $input = $request->input('email') ?? $request->input('email_or_phone');
+
+        // Cek apakah input berupa email atau nomor telepon
         $user = null;
-        if (filter_var($request->email_or_phone, FILTER_VALIDATE_EMAIL)) {
-            $user = User::where('email', $request->email_or_phone)->first();
+        if (filter_var($input, FILTER_VALIDATE_EMAIL)) {
+            $user = User::where('email', $input)->first();
         } else {
-            $user = User::where('no_telepon', $request->email_or_phone)->first();
+            $user = User::where('no_telepon', $input)->first();
         }
 
         // Jika user tidak ditemukan atau password tidak cocok

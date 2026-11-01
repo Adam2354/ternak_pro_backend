@@ -174,7 +174,7 @@ class AIRecommendationController extends Controller
                         $recs[$k]['ranking'] = $k + 1;
                     }
 
-                    $payload['recommendations'] = $recs;
+                    $payload['recommendations'] = $this->removeRoiFields($recs);
 
                     return response()->json([
                         'success' => true,
@@ -203,7 +203,9 @@ class AIRecommendationController extends Controller
                     return response()->json([
                         'success' => true,
                         'message' => 'Recommendation success',
-                        'data' => ['recommendations' => $recs]
+                        'data' => [
+                            'recommendations' => $this->removeRoiFields($recs)
+                        ]
                     ]);
                 }
             }
@@ -608,5 +610,20 @@ class AIRecommendationController extends Controller
         });
 
         return $recommendations;
+    }
+
+    private function removeRoiFields(array $value): array
+    {
+        foreach ($value as $key => $item) {
+            if (is_array($item)) {
+                $value[$key] = $this->removeRoiFields($item);
+            }
+
+            if (is_string($key) && strtolower($key) === 'roi') {
+                unset($value[$key]);
+            }
+        }
+
+        return $value;
     }
 }

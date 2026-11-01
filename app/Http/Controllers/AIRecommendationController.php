@@ -453,25 +453,9 @@ class AIRecommendationController extends Controller
 
         $item['biaya_per_ekor_estimasi'] = (int) round(array_sum($item['breakdown_per_ekor']));
 
-        // Rule: if user's modal less than modal minimum -> estimasi 0 and hide breakdown/sisa
-        if ($modal < $modalMinimum) {
-            $item['biaya_total_per_ekor'] = null;
-            $item['estimasi_ekor'] = 0;
-            $item['sisa_modal'] = null;
-            $item['breakdown_biaya'] = null;
-            $item['breakdown_total_estimasi'] = [
-                'bibit' => 0,
-                'kandang' => 0,
-                'pakan_awal' => 0,
-                'lainnya' => 0,
-            ];
-            $item['biaya_kandang_estimasi'] = 0;
-            $item['status'] = 'Modal belum mencukupi';
-
-            return $item;
-        }
-
-        // If modal is sufficient, apply 85% operational reserve rule
+        // Estimate the number of animals independently from the recommended
+        // minimum business scale. This lets the UI report that one animal is
+        // affordable even when the ideal starting scale is not yet affordable.
         $estimasiEkor = $biayaTotalPerEkor > 0
             ? (int) floor(($modal * 0.85) / $biayaTotalPerEkor)
             : 0;
@@ -510,7 +494,13 @@ class AIRecommendationController extends Controller
             'lainnya' => (int) round(($item['breakdown_per_ekor']['lainnya'] ?? 0) * $estimasiEkor),
         ];
         $item['biaya_kandang_estimasi'] = $item['breakdown_total_estimasi']['kandang'];
-        $item['status'] = 'Modal mencukupi';
+        $item['modal_cukup_1_ekor'] = $modal >= $biayaTotalPerEkor;
+        $item['modal_cukup_minimum_usaha'] = $modal >= $modalMinimum;
+        $item['status'] = $item['modal_cukup_minimum_usaha']
+            ? 'Modal mencukupi'
+            : ($item['modal_cukup_1_ekor']
+                ? 'Modal cukup untuk 1 ekor; belum mencapai skala minimum usaha'
+                : 'Modal belum mencukupi untuk 1 ekor');
 
         return $item;
     }
